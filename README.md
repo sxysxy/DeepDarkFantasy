@@ -1,2 +1,2 @@
 # DeepDarkFantasy
-(Making) C++ Deep Learning Library... To learn about DL
+(Making) Ruby Deep Learning Library... To learn about DL
