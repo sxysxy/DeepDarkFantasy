@@ -4,3 +4,4 @@ namspace DDF
 module DDF
 end
 
+require_relative 'DDF/MathTool.rb'
