@@ -1,4 +1,9 @@
-require_relative '../lib/DeepDarkFantasy.rb'
+begin 
+    require 'DeepDarkFantasy'
+rescue 
+    require_relative '../lib/DeepDarkFantasy.rb'
+end
+
 SEP = "-------------------------------"
 
 #Test vector 

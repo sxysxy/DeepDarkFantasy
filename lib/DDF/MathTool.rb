@@ -23,6 +23,7 @@ module DDF
         end
 
         # data array setter
+        # Do not recommend call by user directly
         def data=(d)
             @data = d
             @row_size = d.size
@@ -48,7 +49,7 @@ module DDF
 
         # Get all elements in i-th row (data is cloned)
         def row(i)
-            @data[i].clone
+            DDF::RowVector[*@data[i].clone]
         end
 
         # Get all elements in i-th column (data is cloned)
@@ -57,7 +58,7 @@ module DDF
             @row_size.times {|j|
                 r << @data[j][i]
             }
-            r
+            DDF::ColVector[*r]
         end
 
         # for each element A_ij, A_ij := op(A_ij, m or m_i or m_ij)
@@ -192,6 +193,22 @@ module DDF
             end
         end
 
+        def transpose!
+            d = Array.new(@col_size) {Array.new(@row_size)}
+            (0...@col_size).each {|i| 
+                (0...@row_size).each {|j| 
+                    d[i][j] = @data[j][i]
+                }
+            }
+            self.data = d
+            return self
+        end
+
+        def transpose
+            t = self.clone
+            return t.transpose!
+        end
+
         def inspect
             "#{@row_size} rows, #{@col_size} columns\n[#{@data.map{|x| x.to_s}.join("\n ")}]\n"
         end
@@ -218,7 +235,7 @@ module DDF
         end
         alias :old_mul :*
         def *(m)
-            if m.is_a?(DDF::RowVector) || m.is_a?(DDF::ColVector)
+            if m.is_a?(DDF::RowVector) 
                 v = DDF::RowVector.new(self.size)
                 self.size.times {|i| v[i] = self[i] * m[i]}      
                 return v
@@ -228,10 +245,23 @@ module DDF
         end
         def clone 
             x = self.class.new(size)
-            x.data = Marshal.load(Marshal.dump(@data))
+            x.size.times {|i| x[i] = self[i]}
+            x
+        end
+
+        #RowVector transpose to an ColVector
+        def transpose
+            x = ColVector.new(size)
+            x.size.times {|i| x[i] = self[i]}
             x
         end
         include Enumerable
+        def each
+            self.size.times {|i| yield(self[i]) }
+        end
+        def to_v(_) 
+            self
+        end
     end
     class ColVector < DDF::Matrix
         def self.[](*a)
@@ -254,7 +284,7 @@ module DDF
         end
         alias :old_mul :*
         def *(m)
-            if m.is_a?(DDF::RowVector) || m.is_a?(DDF::ColVector)
+            if m.is_a?(DDF::ColVector)
                 v = DDF::ColVector.new(self.size)
                 self.size.times {|i| v[i] = self[i] * m[i]}      
                 return v
@@ -264,8 +294,22 @@ module DDF
         end
         def clone 
             x = self.class.new(size)
-            x.data = Marshal.load(Marshal.dump(@data))
+            x.size.times {|i| x[i] = self[i]}
             x
+        end
+
+        #ColVector transpose to an RowVector
+        def transpose
+            x = RowVector.new(size)
+            x.size.times {|i| x[i] = self[i]}
+            x
+        end
+        include Enumerable
+        def each
+            self.size.times {|i| yield(self[i]) }
+        end
+        def to_v(_)
+            self
         end
     end
 
@@ -301,8 +345,8 @@ end
     [[:__add, :+, lambda {|x,y| x+y}], [:__sub, :-, lambda {|x,y| y-x}], [:__mul, :*, lambda {|x,y| x*y}], [:__div, :/, lambda {|x,y| y/x}]].each {|new_name, old_name, op|
         alias_method(new_name, old_name)
         define_method(old_name) {|arg|
-            if arg.is_a?(DDF::Matrix)
-                return arg.clone.each_with_operator(self, op)
+            if Math.is_vector?(arg)
+                return arg.to_v(arg.is_a?(DDF::RowVector)).clone.each_with_operator(self, op)
             else
                 return self.method(new_name).call(arg)
             end
@@ -325,8 +369,8 @@ Math.instance_exec {
             alias_method(new_name, m)
             define_method(m) {|arg|
                 nm = self.method(new_name)
-                if arg.is_a?(DDF::Matrix)
-                    res = arg.clone 
+                if Math.is_vector?(arg)
+                    res = arg.to_v(arg.is_a?(DDF::RowVector)).clone 
                     res.row_size.times {|i|
                         res.col_size.times {|j|
                             res[i, j] = nm.call(res[i, j])
@@ -346,11 +390,11 @@ module Math
     
     #test whether an object is a DDF::RowVector or DDF::ColVector
     def self.is_vector?(v)
-        return v.is_a?(DDF::ColVector) || v.is_a?(DDF::RowVector)
+        return v.is_a?(DDF::ColVector) || v.is_a?(DDF::RowVector) || v.is_a?(Array)
     end
 
     def self.sigmoid(x)
-        (x.is_a? Numeric) ? SIGMOID[x, 0] : x.each_with_operator(0, SIGMOID)
+        (x.is_a? Numeric) ? SIGMOID[x, 0] : x.to_v.each_with_operator(0, SIGMOID)
     end
 
     def self.dsigmoid(x)
@@ -380,7 +424,7 @@ module Math
 
     SOFTPLUS = lambda {|x, _| Math.__log(1 + Math.__exp(x))}
     def self.softplus(x)
-        return (x.is_a?(Numeric)) ? SOFTPLUS[x] : x.each_with_operator(0, SOFTPLUS) 
+        return (x.is_a?(Numeric)) ? SOFTPLUS[x] : x.to_v.each_with_operator(0, SOFTPLUS) 
     end
     def self.dsoftplus(x)
         return Math.sigmoid(x)
@@ -388,11 +432,11 @@ module Math
 
     RELU = lambda {|x, _| x > 0 ? x : 0}
     def self.relu(x)
-        return (x.is_a(Numeric)) ? RELU[x] : x.each_with_operator(0, RELU)
+        return (x.is_a(Numeric)) ? RELU[x] : x.to_v.each_with_operator(0, RELU)
     end
 
     def self.dtanh(x)
-        return (x.is_a?(Numeric)) ? Math.__tanh(x) : x.each_with_operator(0, lambda {|x, _| v = Math.__tanh(x); 1 - v*v})
+        return (x.is_a?(Numeric)) ? Math.__tanh(x) : x.to_v.each_with_operator(0, lambda {|x, _| v = Math.__tanh(x); 1 - v*v})
     end
 end
 
